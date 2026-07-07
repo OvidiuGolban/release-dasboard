@@ -1,0 +1,78 @@
+name: Trinity Release Dashboard
+
+# Builds an interactive HTML dashboard of GitHub Releases across the configured
+# Flutter-Global repositories, grouped by component and filterable by status
+# (Released / Unreleased / Draft) and component, then publishes it to GitHub Pages.
+
+on:
+  schedule:
+    - cron: '0 6 * * *'          # daily at 06:00 UTC
+  workflow_dispatch: {}          # manual "Run workflow" button
+  release:
+    types: [published, edited, deleted]   # refresh when a release in THIS repo changes
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Allow only one concurrent deployment, without cancelling an in-progress run.
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Build dashboard
+        env:
+          # Token with read access to all target repos (org-scoped, read-only).
+          # ${{ github.token }} only sees THIS repo, so a cross-repo dashboard
+          # needs a PAT / GitHub App token stored as the DASHBOARD_TOKEN secret.
+          GH_TOKEN: ${{ secrets.DASHBOARD_TOKEN }}
+
+          # Repository selection (first match wins inside the script):
+          #  1. DASHBOARD_REPOS  -> explicit comma-separated list.
+          #  2. configs/*.json   -> repos with "generateGithubReleaseNotes": true.
+          #  3. script default.
+          # Uncomment to pin an explicit list:
+          # DASHBOARD_REPOS: 'hlp,ccc,crp'
+          DASHBOARD_OWNER: 'Flutter-Global'
+          DASHBOARD_CONFIG_FOLDER: './configs'
+        run: python scripts/build_release_dashboard.py
+
+      - name: Add to run summary
+        run: |
+          echo "### Release dashboard generated" >> "$GITHUB_STEP_SUMMARY"
+          echo "See the published GitHub Pages site for the interactive view." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Prepare Pages artifact
+        run: |
+          mkdir -p _site
+          cp dashboard.html _site/index.html
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
+
