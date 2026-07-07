@@ -60,20 +60,9 @@ def discover_repos():
 def gh_json(path):
     """Call `gh api --paginate <path>` and return the parsed JSON (list)."""
     try:
-        proc = subprocess.Popen(
-            ["gh", "api", "--paginate", path],
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        out, err = proc.communicate()
-        if isinstance(out, bytes):
-            out = out.decode("utf-8", "replace")
-        if isinstance(err, bytes):
-            err = err.decode("utf-8", "replace")
-        if proc.returncode != 0:
-            print("WARN: gh api failed for %s (exit %s): %s"
-                  % (path, proc.returncode, err.strip()[:500]))
-            return []
-    except OSError as exc:
-        print("ERROR: could not run 'gh' (is the CLI installed?): %s" % exc)
+        out = subprocess.check_output(["gh", "api", "--paginate", path])
+    except subprocess.CalledProcessError as exc:
+        print("WARN: gh api failed for %s: %s" % (path, exc))
         return []
     out = out.strip()
     return json.loads(out) if out else []
@@ -106,7 +95,6 @@ def collect_rows(repos):
     rows = []
     for repo in repos:
         releases = gh_json("repos/%s/%s/releases" % (OWNER, repo))
-        print("  %s/%s -> %d release(s)" % (OWNER, repo, len(releases)))
         for rel in releases:
             tag = rel.get("tag_name", "") or ""
             rows.append({
