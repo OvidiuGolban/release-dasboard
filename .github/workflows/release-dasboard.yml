@@ -44,8 +44,8 @@ jobs:
           #  1. DASHBOARD_REPOS  -> explicit comma-separated list.
           #  2. configs/*.json   -> repos with "generateGithubReleaseNotes": true.
           #  3. script default.
-          # Uncomment to pin an explicit list:
-          # DASHBOARD_REPOS: 'hlp,ccc,crp'
+          # Add every repo that publishes releases, comma-separated (no spaces needed).
+          DASHBOARD_REPOS: 'hlp'
           DASHBOARD_OWNER: 'Flutter-Global'
           DASHBOARD_CONFIG_FOLDER: './configs'
         run: python scripts/build_release_dashboard.py
