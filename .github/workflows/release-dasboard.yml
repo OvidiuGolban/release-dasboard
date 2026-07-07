@@ -44,8 +44,8 @@ jobs:
           #  1. DASHBOARD_REPOS  -> explicit comma-separated list.
           #  2. configs/*.json   -> repos with "generateGithubReleaseNotes": true.
           #  3. script default.
-          # Add every repo that publishes releases, comma-separated (no spaces needed).
-          DASHBOARD_REPOS: 'hlp'
+          # All TLA GitHub repos (simple-name gitProject values under Flutter-Global).
+          DASHBOARD_REPOS: 'ais,ame-tests,amt,ans,aos,apa,atz,avx,awa,bth,cas,ccc,ccw,ccx,clx,cns,crc,cro,crp,csh,cvg,cxs,dcc,die,dsrs,esx,fla,fss,hks,hlp,hsgx,ins,iss,kse,landing-admin-console,messaging-admin-console,ocb,payments-associations-service,payments-console-webservice,payments-gateway-service,payments-limits-service,payments-rule-engine-service,payments-transactions-service,payments-web-webservice,pba,pol,promotions-rendering-service,psf,rws,scs,ssm,sso,uki-gamstop-adapter,usp,wms'
           DASHBOARD_OWNER: 'Flutter-Global'
           DASHBOARD_CONFIG_FOLDER: './configs'
         run: python scripts/build_release_dashboard.py
