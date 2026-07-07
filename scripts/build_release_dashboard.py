@@ -223,8 +223,6 @@ def render_html(rows):
 
 
 def main():
-    token_present = bool(os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN"))
-    print("Auth: GH_TOKEN present = %s" % token_present)
     repos = discover_repos()
     print("Scanning %d repositories under %s: %s" % (len(repos), OWNER, ", ".join(repos)))
     rows = collect_rows(repos)
