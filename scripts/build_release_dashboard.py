@@ -33,9 +33,9 @@ import datetime
 OWNER = os.environ.get("DASHBOARD_OWNER", "Flutter-Global")
 DEFAULT_REPOS = ["hlp", "ccc", "crp"]
 
-# Matches an alphabetic component prefix in tags like "hlpbf-1764" or "ccc-1356".
-# The hyphen is required so numeric-only tags ("1764") and semver-style tags
-# ("v1.2.3") do not match and fall back to the repo name.
+# Matches an alphabetic component prefix in tags like "hlpbf-1764" or
+# "ccc-1356". The hyphen is required so numeric-only tags ("1764") and
+# semver-style tags ("v1.2.3") fall back to the repo name instead.
 TAG_PREFIX_RE = re.compile(r"^([A-Za-z]+)-\d+")
 
 
@@ -77,9 +77,8 @@ def gh_json(path):
 def component_of(tag, repo):
     """Derive the component name for a release.
 
-    Tags come in mixed formats across repos:
-        "hlpbf-1764" / "ccc-1356" -> alphabetic prefix ("hlpbf" / "ccc")
-        "1764" (numeric only)      -> no prefix, fall back to the repo name
+    "hlpbf-1764" / "ccc-1356" -> alphabetic prefix ("hlpbf" / "ccc")
+    "1764" (numeric only)      -> no prefix, fall back to the repo name
     """
     match = TAG_PREFIX_RE.match((tag or "").strip())
     if match:
@@ -111,7 +110,7 @@ def collect_rows(repos):
         releases = gh_json("repos/%s/%s/releases" % (OWNER, repo))
         for rel in releases:
             tag = rel.get("tag_name", "") or ""
-            # Prefer the release's own page; fall back to the tag URL so the
+            # Prefer the release page; fall back to the tag URL so the
             # "open" link always resolves to the release (notes) page.
             url = rel.get("html_url") or ""
             if not url and tag:
