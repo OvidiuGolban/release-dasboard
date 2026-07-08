@@ -91,10 +91,44 @@ def html_escape(value):
             .replace('"', "&quot;"))
 
 
+def repo_component_map():
+    """Optional explicit repo->component overrides via the
+    DASHBOARD_COMPONENT_MAP env var, e.g. "hlp=hlpbf,ccc=ccc,crp=crp"."""
+    mapping = {}
+    for pair in os.environ.get("DASHBOARD_COMPONENT_MAP", "").split(","):
+        pair = pair.strip()
+        if "=" in pair:
+            key, value = pair.split("=", 1)
+            if key.strip() and value.strip():
+                mapping[key.strip()] = value.strip()
+    return mapping
+
+
+def infer_repo_component(releases, repo):
+    """Single component name for a repo.
+
+    Uses the alphabetic tag prefix produced by the release-notes tooling
+    (e.g. "hlpbf-2060" -> "hlpbf") when the repo has exactly one such prefix,
+    so the repo's native numeric build tags ("1764", "482", ...) inherit that
+    same component. Falls back to the repo name when there is no single
+    unambiguous prefix.
+    """
+    prefixes = set()
+    for rel in releases:
+        match = TAG_PREFIX_RE.match((rel.get("tag_name", "") or "").strip())
+        if match:
+            prefixes.add(match.group(1).lower())
+    if len(prefixes) == 1:
+        return next(iter(prefixes))
+    return repo
+
+
 def collect_rows(repos):
     rows = []
+    overrides = repo_component_map()
     for repo in repos:
         releases = gh_json("repos/%s/%s/releases" % (OWNER, repo))
+        fallback = overrides.get(repo) or infer_repo_component(releases, repo)
         for rel in releases:
             tag = rel.get("tag_name", "") or ""
             rows.append({
