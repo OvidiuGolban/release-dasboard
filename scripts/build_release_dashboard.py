@@ -23,6 +23,7 @@ The list of repositories can be provided in three ways (first match wins):
 """
 
 import os
+import re
 import json
 import glob
 import subprocess
@@ -31,6 +32,11 @@ import datetime
 
 OWNER = os.environ.get("DASHBOARD_OWNER", "Flutter-Global")
 DEFAULT_REPOS = ["hlp", "ccc", "crp"]
+
+# Matches an alphabetic component prefix in tags like "hlpbf-1764" or "ccc-1356".
+# The hyphen is required so numeric-only tags ("1764") and semver-style tags
+# ("v1.2.3") do not match and fall back to the repo name.
+TAG_PREFIX_RE = re.compile(r"^([A-Za-z]+)-\d+")
 
 
 def discover_repos():
@@ -68,9 +74,17 @@ def gh_json(path):
     return json.loads(out) if out else []
 
 
-def component_of(tag):
-    """"hlpbf-1773" -> "hlpbf"; strip the trailing -<build> segment."""
-    return tag.rsplit("-", 1)[0] if "-" in tag else tag
+def component_of(tag, repo):
+    """Derive the component name for a release.
+
+    Tags come in mixed formats across repos:
+        "hlpbf-1764" / "ccc-1356" -> alphabetic prefix ("hlpbf" / "ccc")
+        "1764" (numeric only)      -> no prefix, fall back to the repo name
+    """
+    match = TAG_PREFIX_RE.match((tag or "").strip())
+    if match:
+        return match.group(1).lower()
+    return repo
 
 
 def status_of(rel):
@@ -97,14 +111,19 @@ def collect_rows(repos):
         releases = gh_json("repos/%s/%s/releases" % (OWNER, repo))
         for rel in releases:
             tag = rel.get("tag_name", "") or ""
+            # Prefer the release's own page; fall back to the tag URL so the
+            # "open" link always resolves to the release (notes) page.
+            url = rel.get("html_url") or ""
+            if not url and tag:
+                url = "https://github.com/%s/%s/releases/tag/%s" % (OWNER, repo, tag)
             rows.append({
                 "repo": repo,
-                "component": component_of(tag),
+                "component": component_of(tag, repo),
                 "tag": tag,
                 "name": rel.get("name") or tag,
                 "status": status_of(rel),
                 "date": (rel.get("published_at") or rel.get("created_at") or "")[:10],
-                "url": rel.get("html_url", ""),
+                "url": url,
             })
     rows.sort(key=lambda r: r["date"], reverse=True)
     return rows
