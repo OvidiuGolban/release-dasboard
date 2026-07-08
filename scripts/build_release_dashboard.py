@@ -12,12 +12,6 @@ Status mapping (derived from each release object):
     prerelease   == true  -> "Unreleased"   (temporary release from the Initial job)
     otherwise             -> "Released"     (promoted release from the Final job)
 
-Components:
-    Only tooling releases whose tag looks like "<tla>-<n>" (e.g. "hlpbf-2079") are
-    shown by default; each such tag maps to its exact TLA (hlpbf, hlppp, hlpsbg,
-    crpbf, ...). Legacy numeric tags (e.g. "1764") cannot be attributed to a
-    specific sub-TLA and are hidden unless DASHBOARD_INCLUDE_LEGACY is set.
-
 Output: dashboard.html in the current working directory.
 
 The list of repositories can be provided in three ways (first match wins):
@@ -29,7 +23,6 @@ The list of repositories can be provided in three ways (first match wins):
 """
 
 import os
-import re
 import json
 import glob
 import subprocess
@@ -38,11 +31,6 @@ import datetime
 
 OWNER = os.environ.get("DASHBOARD_OWNER", "Flutter-Global")
 DEFAULT_REPOS = ["hlp", "ccc", "crp"]
-
-# Matches an alphabetic component prefix in tags like "hlpbf-1764" or "ccc-1356".
-# The hyphen is required so numeric-only tags ("1764") and semver-style tags
-# ("v1.2.3") do not match and are treated as legacy/unattributable.
-TAG_PREFIX_RE = re.compile(r"^([A-Za-z]+)-\d+")
 
 
 def discover_repos():
@@ -69,88 +57,20 @@ def discover_repos():
     return list(DEFAULT_REPOS)
 
 
-def _parse_concatenated_json(text):
-    """Decode one-or-more concatenated JSON documents and merge into a list.
-
-    `gh api --paginate` emits one JSON array per page ("[...][...]"), which is
-    not valid single-document JSON, so json.loads() would raise "Extra data".
-    We decode each document in turn and flatten arrays into a single list.
-    """
-    decoder = json.JSONDecoder()
-    results = []
-    idx = 0
-    length = len(text)
-    while idx < length:
-        while idx < length and text[idx].isspace():
-            idx += 1
-        if idx >= length:
-            break
-        obj, end = decoder.raw_decode(text, idx)
-        if isinstance(obj, list):
-            results.extend(obj)
-        else:
-            results.append(obj)
-        idx = end
-    return results
-
-
 def gh_json(path):
-    """Call `gh api --paginate <path>` and return a merged JSON list.
-
-    With --paginate, gh concatenates one JSON array per page ("[...][...]"),
-    which is not valid single-document JSON; parse each page and merge so that
-    repos with more than one page (~30+ releases) do not crash the build.
-    """
+    """Call `gh api --paginate <path>` and return the parsed JSON (list)."""
     try:
         out = subprocess.check_output(["gh", "api", "--paginate", path])
-    except (subprocess.CalledProcessError, OSError) as exc:
+    except subprocess.CalledProcessError as exc:
         print("WARN: gh api failed for %s: %s" % (path, exc))
         return []
-    if isinstance(out, bytes):
-        out = out.decode("utf-8", "replace")
     out = out.strip()
-    if not out:
-        return []
-    try:
-        return _parse_concatenated_json(out)
-    except ValueError as exc:
-        print("WARN: could not parse gh api output for %s: %s" % (path, exc))
-        return []
+    return json.loads(out) if out else []
 
 
-def repo_component_map():
-    """Optional explicit repo->component overrides via the DASHBOARD_COMPONENT_MAP
-    env var, e.g. "hlp=hlpbf,ccc=ccc,crp=crp"."""
-    mapping = {}
-    for pair in os.environ.get("DASHBOARD_COMPONENT_MAP", "").split(","):
-        pair = pair.strip()
-        if "=" in pair:
-            key, value = pair.split("=", 1)
-            if key.strip() and value.strip():
-                mapping[key.strip()] = value.strip()
-    return mapping
-
-
-def tag_prefix(tag):
-    """Return the alphabetic component prefix of a tag, or None."""
-    match = TAG_PREFIX_RE.match((tag or "").strip())
-    return match.group(1).lower() if match else None
-
-
-def infer_repo_component(releases, repo):
-    """Repo-level fallback component (used only for legacy tags when included).
-
-    Uses the single tooling tag prefix when the repo has exactly one; otherwise
-    the repo name.
-    """
-    prefixes = set()
-    for rel in releases:
-        prefix = tag_prefix(rel.get("tag_name", ""))
-        if prefix:
-            prefixes.add(prefix)
-    if len(prefixes) == 1:
-        return next(iter(prefixes))
-    return repo
+def component_of(tag):
+    """"hlpbf-1773" -> "hlpbf"; strip the trailing -<build> segment."""
+    return tag.rsplit("-", 1)[0] if "-" in tag else tag
 
 
 def status_of(rel):
@@ -172,35 +92,19 @@ def html_escape(value):
 
 
 def collect_rows(repos):
-    overrides = repo_component_map()
-    # By default only tooling releases ("<tla>-<n>") are shown, because their tag
-    # carries the exact TLA/component (hlpbf, hlppp, hlpsbg, ...). Legacy numeric
-    # tags (e.g. "1764") cannot be attributed to a specific sub-TLA; set
-    # DASHBOARD_INCLUDE_LEGACY=1 to include them (grouped under the repo).
-    include_legacy = os.environ.get("DASHBOARD_INCLUDE_LEGACY", "").strip().lower() \
-        in ("1", "true", "yes")
     rows = []
     for repo in repos:
         releases = gh_json("repos/%s/%s/releases" % (OWNER, repo))
-        fallback = overrides.get(repo) or infer_repo_component(releases, repo)
         for rel in releases:
             tag = rel.get("tag_name", "") or ""
-            prefix = tag_prefix(tag)
-            if prefix is None and not include_legacy:
-                continue
-            # Prefer the release page; fall back to the tag URL so the "open"
-            # link always resolves to the release (notes) page.
-            url = rel.get("html_url") or ""
-            if not url and tag:
-                url = "https://github.com/%s/%s/releases/tag/%s" % (OWNER, repo, tag)
             rows.append({
                 "repo": repo,
-                "component": prefix or fallback,
+                "component": component_of(tag),
                 "tag": tag,
                 "name": rel.get("name") or tag,
                 "status": status_of(rel),
                 "date": (rel.get("published_at") or rel.get("created_at") or "")[:10],
-                "url": url,
+                "url": rel.get("html_url", ""),
             })
     rows.sort(key=lambda r: r["date"], reverse=True)
     return rows
@@ -318,3 +222,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
