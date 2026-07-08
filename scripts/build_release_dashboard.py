@@ -63,17 +63,53 @@ def discover_repos():
     return list(DEFAULT_REPOS)
 
 
+def _parse_concatenated_json(text):
+    """Decode one-or-more concatenated JSON documents and merge into a list.
+
+    `gh api --paginate` emits one JSON array per page ("[...][...]"), which is
+    not valid single-document JSON, so json.loads() would raise "Extra data".
+    We decode each document in turn and flatten arrays into a single list.
+    """
+    decoder = json.JSONDecoder()
+    results = []
+    idx = 0
+    length = len(text)
+    while idx < length:
+        while idx < length and text[idx].isspace():
+            idx += 1
+        if idx >= length:
+            break
+        obj, end = decoder.raw_decode(text, idx)
+        if isinstance(obj, list):
+            results.extend(obj)
+        else:
+            results.append(obj)
+        idx = end
+    return results
+
+
 def gh_json(path):
-    """Call `gh api --paginate <path>` and return the parsed JSON (list)."""
+    """Call `gh api --paginate <path>` and return a merged JSON list.
+
+    With --paginate, gh concatenates one JSON array per page ("[...][...]"),
+    which is not valid single-document JSON; parse each page and merge so that
+    repos with more than one page (~30+ releases) do not crash the build.
+    """
     try:
         out = subprocess.check_output(["gh", "api", "--paginate", path])
-    except subprocess.CalledProcessError as exc:
+    except (subprocess.CalledProcessError, OSError) as exc:
         print("WARN: gh api failed for %s: %s" % (path, exc))
         return []
     if isinstance(out, bytes):
         out = out.decode("utf-8", "replace")
     out = out.strip()
-    return json.loads(out) if out else []
+    if not out:
+        return []
+    try:
+        return _parse_concatenated_json(out)
+    except ValueError as exc:
+        print("WARN: could not parse gh api output for %s: %s" % (path, exc))
+        return []
 
 
 def repo_component_map():
