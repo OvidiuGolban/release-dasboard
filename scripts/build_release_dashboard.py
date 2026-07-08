@@ -23,6 +23,7 @@ The list of repositories can be provided in three ways (first match wins):
 """
 
 import os
+import re
 import json
 import glob
 import subprocess
@@ -31,6 +32,11 @@ import datetime
 
 OWNER = os.environ.get("DASHBOARD_OWNER", "Flutter-Global")
 DEFAULT_REPOS = ["hlp", "ccc", "crp"]
+
+# Matches an alphabetic component prefix in tags like "hlpbf-1764" or "ccc-1356".
+# The hyphen is required so numeric-only tags ("1764") and semver-style tags
+# ("v1.2.3") do not match and fall back to a repo-level component.
+TAG_PREFIX_RE = re.compile(r"^([A-Za-z]+)-\d+")
 
 
 def discover_repos():
@@ -64,13 +70,54 @@ def gh_json(path):
     except subprocess.CalledProcessError as exc:
         print("WARN: gh api failed for %s: %s" % (path, exc))
         return []
+    if isinstance(out, bytes):
+        out = out.decode("utf-8", "replace")
     out = out.strip()
     return json.loads(out) if out else []
 
 
-def component_of(tag):
-    """"hlpbf-1773" -> "hlpbf"; strip the trailing -<build> segment."""
-    return tag.rsplit("-", 1)[0] if "-" in tag else tag
+def repo_component_map():
+    """Optional explicit repo->component overrides via the DASHBOARD_COMPONENT_MAP
+    env var, e.g. "hlp=hlpbf,ccc=ccc,crp=crp"."""
+    mapping = {}
+    for pair in os.environ.get("DASHBOARD_COMPONENT_MAP", "").split(","):
+        pair = pair.strip()
+        if "=" in pair:
+            key, value = pair.split("=", 1)
+            if key.strip() and value.strip():
+                mapping[key.strip()] = value.strip()
+    return mapping
+
+
+def tag_prefix(tag):
+    """Return the alphabetic component prefix of a tag, or None."""
+    match = TAG_PREFIX_RE.match((tag or "").strip())
+    return match.group(1).lower() if match else None
+
+
+def infer_repo_component(releases, repo):
+    """Single component name for a repo.
+
+    Uses the alphabetic tag prefix produced by the release-notes tooling
+    (e.g. "hlpbf-2060" -> "hlpbf") when the repo has exactly one such prefix, so
+    the repo's native numeric build tags ("1764", "482", ...) inherit that same
+    component. Falls back to the repo name when there is no single unambiguous
+    prefix.
+    """
+    prefixes = set()
+    for rel in releases:
+        prefix = tag_prefix(rel.get("tag_name", ""))
+        if prefix:
+            prefixes.add(prefix)
+    if len(prefixes) == 1:
+        return next(iter(prefixes))
+    return repo
+
+
+def component_of(tag, fallback):
+    """Component for a single release: the tag's own alphabetic prefix if present,
+    otherwise the repo-level fallback component."""
+    return tag_prefix(tag) or fallback
 
 
 def status_of(rel):
@@ -91,54 +138,29 @@ def html_escape(value):
             .replace('"', "&quot;"))
 
 
-def repo_component_map():
-    """Optional explicit repo->component overrides via the
-    DASHBOARD_COMPONENT_MAP env var, e.g. "hlp=hlpbf,ccc=ccc,crp=crp"."""
-    mapping = {}
-    for pair in os.environ.get("DASHBOARD_COMPONENT_MAP", "").split(","):
-        pair = pair.strip()
-        if "=" in pair:
-            key, value = pair.split("=", 1)
-            if key.strip() and value.strip():
-                mapping[key.strip()] = value.strip()
-    return mapping
-
-
-def infer_repo_component(releases, repo):
-    """Single component name for a repo.
-
-    Uses the alphabetic tag prefix produced by the release-notes tooling
-    (e.g. "hlpbf-2060" -> "hlpbf") when the repo has exactly one such prefix,
-    so the repo's native numeric build tags ("1764", "482", ...) inherit that
-    same component. Falls back to the repo name when there is no single
-    unambiguous prefix.
-    """
-    prefixes = set()
-    for rel in releases:
-        match = TAG_PREFIX_RE.match((rel.get("tag_name", "") or "").strip())
-        if match:
-            prefixes.add(match.group(1).lower())
-    if len(prefixes) == 1:
-        return next(iter(prefixes))
-    return repo
-
-
 def collect_rows(repos):
-    rows = []
     overrides = repo_component_map()
+    rows = []
     for repo in repos:
         releases = gh_json("repos/%s/%s/releases" % (OWNER, repo))
+        # One component per repo: explicit override, else inferred from the
+        # tooling tag prefix, else the repo name.
         fallback = overrides.get(repo) or infer_repo_component(releases, repo)
         for rel in releases:
             tag = rel.get("tag_name", "") or ""
+            # Prefer the release page; fall back to the tag URL so the "open"
+            # link always resolves to the release (notes) page.
+            url = rel.get("html_url") or ""
+            if not url and tag:
+                url = "https://github.com/%s/%s/releases/tag/%s" % (OWNER, repo, tag)
             rows.append({
                 "repo": repo,
-                "component": component_of(tag),
+                "component": component_of(tag, fallback),
                 "tag": tag,
                 "name": rel.get("name") or tag,
                 "status": status_of(rel),
                 "date": (rel.get("published_at") or rel.get("created_at") or "")[:10],
-                "url": rel.get("html_url", ""),
+                "url": url,
             })
     rows.sort(key=lambda r: r["date"], reverse=True)
     return rows
